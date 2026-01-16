@@ -51,7 +51,6 @@ const WatchLive: React.FC = () => {
   const videoStreamSet = useRef(false);
   const playAttempted = useRef(false);
   const iceConnected = useRef(false);
-  const setupComplete = useRef(false);
   
   const ICE_SERVERS: RTCConfiguration = {
     iceServers: [
@@ -78,9 +77,11 @@ const WatchLive: React.FC = () => {
   }, [streamId]);
 
   // Register as viewer and setup WebRTC
+  const webRTCSetupRef = useRef(false);
+  
   useEffect(() => {
-    if (!streamId || setupComplete.current) return;
-    setupComplete.current = true;
+    if (!streamId || webRTCSetupRef.current) return;
+    webRTCSetupRef.current = true;
 
     const myViewerId = viewerId.current;
     const viewerRefPath = ref(rtdb, `streams/${streamId}/viewers/${myViewerId}`);
@@ -248,7 +249,7 @@ const WatchLive: React.FC = () => {
       videoStreamSet.current = false;
       playAttempted.current = false;
       iceConnected.current = false;
-      setupComplete.current = false;
+      webRTCSetupRef.current = false;
       setHasVideo(false);
     };
   }, [streamId]);
