@@ -48,6 +48,8 @@ const WatchLive: React.FC = () => {
   const [hasVideo, setHasVideo] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [showPlayButton, setShowPlayButton] = useState(false);
+  const videoStreamSet = useRef(false);
+  const playAttempted = useRef(false);
   
   const ICE_SERVERS: RTCConfiguration = {
     iceServers: [
@@ -110,19 +112,35 @@ const WatchLive: React.FC = () => {
         // Handle incoming video stream
         pc.ontrack = (event) => {
           console.log('Track received:', event.track.kind);
-          if (videoRef.current && event.streams[0]) {
+          if (videoRef.current && event.streams[0] && !videoStreamSet.current) {
+            // Set srcObject only once
             videoRef.current.srcObject = event.streams[0];
-            // Start muted for autoplay, but allow unmute later
+            videoStreamSet.current = true;
+            
+            // Configure video element
             videoRef.current.muted = true;
             videoRef.current.playsInline = true;
-            try {
-              videoRef.current.play();
-              setHasVideo(true);
-              setShowPlayButton(false);
-            } catch(e) {
-              console.log("Autoplay blocked, waiting for user tap");
-              setHasVideo(true);
-              setShowPlayButton(true);
+            
+            // Try to play only once
+            if (!playAttempted.current) {
+              playAttempted.current = true;
+              try {
+                const playPromise = videoRef.current.play();
+                if (playPromise !== undefined) {
+                  playPromise.then(() => {
+                    setHasVideo(true);
+                    setShowPlayButton(false);
+                  }).catch((error) => {
+                    console.log("Autoplay blocked, waiting for user tap:", error);
+                    setHasVideo(true);
+                    setShowPlayButton(true);
+                  });
+                }
+              } catch(e) {
+                console.log("Play error:", e);
+                setHasVideo(true);
+                setShowPlayButton(true);
+              }
             }
           }
         };
@@ -210,6 +228,8 @@ const WatchLive: React.FC = () => {
         peerConnectionRef.current = null;
       }
       webrtcInitialized.current = false;
+      videoStreamSet.current = false;
+      playAttempted.current = false;
       setHasVideo(false);
     };
   }, [streamId]);
@@ -360,10 +380,10 @@ const WatchLive: React.FC = () => {
   };
 
   const enableVideo = () => {
-    if (videoRef.current) {
+    if (videoRef.current && videoStreamSet.current) {
       videoRef.current.muted = false;
       videoRef.current.playsInline = true;
-      videoRef.current.play().catch(console.error);
+      // Don't call play() again, just unmute
       setIsMuted(false);
       setShowPlayButton(false);
     }
