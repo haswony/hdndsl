@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { ref, push, set, onValue, onDisconnect } from 'firebase/database';
+import { ref, push, set, onValue, onDisconnect, off } from 'firebase/database';
 import { 
   Radio, Heart, UserPlus, Share2, MoreVertical, 
   ChevronLeft, MessageCircle, Send
@@ -50,6 +50,8 @@ const WatchLive: React.FC = () => {
   const [showPlayButton, setShowPlayButton] = useState(false);
   const videoStreamSet = useRef(false);
   const playAttempted = useRef(false);
+  const iceConnected = useRef(false);
+  const setupComplete = useRef(false);
   
   const ICE_SERVERS: RTCConfiguration = {
     iceServers: [
@@ -77,7 +79,8 @@ const WatchLive: React.FC = () => {
 
   // Register as viewer and setup WebRTC
   useEffect(() => {
-    if (!streamId) return;
+    if (!streamId || setupComplete.current) return;
+    setupComplete.current = true;
 
     const myViewerId = viewerId.current;
     const viewerRefPath = ref(rtdb, `streams/${streamId}/viewers/${myViewerId}`);
@@ -113,6 +116,12 @@ const WatchLive: React.FC = () => {
         pc.ontrack = (event) => {
           console.log('Track received:', event.track.kind);
           if (videoRef.current && event.streams[0] && !videoStreamSet.current) {
+            // Prevent multiple track handling
+            if (videoRef.current.srcObject) {
+              console.log('Video srcObject already set, ignoring new track');
+              return;
+            }
+            
             // Set srcObject only once
             videoRef.current.srcObject = event.streams[0];
             videoStreamSet.current = true;
@@ -121,27 +130,29 @@ const WatchLive: React.FC = () => {
             videoRef.current.muted = true;
             videoRef.current.playsInline = true;
             
-            // Try to play only once
-            if (!playAttempted.current) {
-              playAttempted.current = true;
-              try {
-                const playPromise = videoRef.current.play();
-                if (playPromise !== undefined) {
-                  playPromise.then(() => {
-                    setHasVideo(true);
-                    setShowPlayButton(false);
-                  }).catch((error) => {
-                    console.log("Autoplay blocked, waiting for user tap:", error);
-                    setHasVideo(true);
-                    setShowPlayButton(true);
-                  });
+            // Delay play to avoid ICE interference
+            setTimeout(() => {
+              if (!playAttempted.current) {
+                playAttempted.current = true;
+                try {
+                  const playPromise = videoRef.current?.play();
+                  if (playPromise !== undefined) {
+                    playPromise.then(() => {
+                      setHasVideo(true);
+                      setShowPlayButton(false);
+                    }).catch((error) => {
+                      console.log("Autoplay blocked, waiting for user tap:", error);
+                      setHasVideo(true);
+                      setShowPlayButton(true);
+                    });
+                  }
+                } catch(e) {
+                  console.log("Play error:", e);
+                  setHasVideo(true);
+                  setShowPlayButton(true);
                 }
-              } catch(e) {
-                console.log("Play error:", e);
-                setHasVideo(true);
-                setShowPlayButton(true);
               }
-            }
+            }, 100);
           }
         };
 
@@ -157,6 +168,12 @@ const WatchLive: React.FC = () => {
 
         pc.oniceconnectionstatechange = () => {
           console.log('ICE connection state:', pc.iceConnectionState);
+          if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+            iceConnected.current = true;
+            console.log('ICE fully connected, ignoring further candidates');
+            // Stop listening to new ICE candidates to prevent reconnection
+            off(ref(rtdb, `webrtc/${streamId}/broadcasterCandidates/${myViewerId}`));
+          }
         };
 
         pc.onconnectionstatechange = () => {
@@ -230,6 +247,8 @@ const WatchLive: React.FC = () => {
       webrtcInitialized.current = false;
       videoStreamSet.current = false;
       playAttempted.current = false;
+      iceConnected.current = false;
+      setupComplete.current = false;
       setHasVideo(false);
     };
   }, [streamId]);
@@ -389,6 +408,17 @@ const WatchLive: React.FC = () => {
     }
   };
 
+  const forcePlayVideo = () => {
+    if (videoRef.current && videoStreamSet.current) {
+      videoRef.current.muted = false;
+      videoRef.current.playsInline = true;
+      videoRef.current.play().then(() => {
+        setIsMuted(false);
+        setShowPlayButton(false);
+      }).catch(console.error);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-dark-300 z-50">
       {/* Single video element - never re-created */}
@@ -421,11 +451,11 @@ const WatchLive: React.FC = () => {
         </div>
       )}
       
-      {/* Play button overlay */}
+      {/* Play button overlay - enhanced for mobile */}
       {showPlayButton && (
         <div className="absolute inset-0 z-40 flex items-center justify-center cursor-pointer bg-black/70">
           <button
-            onClick={enableVideo}
+            onClick={forcePlayVideo}
             className="px-8 py-4 bg-gradient-to-r from-red-500 to-pink-500 backdrop-blur-sm rounded-full text-white font-bold text-xl shadow-2xl"
           >
             🔊 اضغط لتشغيل الصوت والفيديو
