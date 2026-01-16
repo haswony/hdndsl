@@ -75,7 +75,8 @@ const WatchLive: React.FC = () => {
 
   // Register as viewer and setup WebRTC
   useEffect(() => {
-    if (!streamId) return;
+    if (!streamId || webrtcInitialized.current) return;
+    webrtcInitialized.current = true;
 
     const myViewerId = viewerId.current;
     const viewerRefPath = ref(rtdb, `streams/${streamId}/viewers/${myViewerId}`);
@@ -211,7 +212,7 @@ const WatchLive: React.FC = () => {
       webrtcInitialized.current = false;
       setHasVideo(false);
     };
-  }, [streamId]);
+  }, [streamId, user]);
 
   // Listen to viewer count
   useEffect(() => {
